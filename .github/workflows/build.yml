@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p build_ci
           cd build_ci
-          cmake .. -DPICO_BOARD=${{ inputs.board }}
+          cmake .. -DPICO_BOARD=${{ inputs.board }} -DVIDPID=Yubikey5
           make -j$(nproc)
 
       - name: Upload artifact
