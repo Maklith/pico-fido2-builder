@@ -53,7 +53,6 @@ jobs:
           name: pico_fido2_${{ inputs.board }}
           path: build_ci/pico_fido2.uf2
 
-  # ==================== 任务 2：ESP32-S3 编译 ====================
   build-esp32s3:
     name: Build ESP32-S3 (${{ inputs.board }})
     if: ${{ inputs.board == 'esp32s3' || inputs.board == 'ESP32-S3' }}
@@ -88,10 +87,9 @@ jobs:
 
       - name: Install ESP-IDF
         run: |
-          git clone --recursive https://github.com/espressif/esp-idf.git
+          rm -rf esp-idf
+          git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git
           cd esp-idf
-          git checkout tags/v5.5
-          git submodule update --init --recursive
           ./install.sh esp32s3
 
       - name: Build ESP32-S3 firmware
@@ -103,12 +101,10 @@ jobs:
 
           rm -rf build managed_components dependencies.lock sdkconfig
 
-          # 官方 ESP-IDF Component Manager 方法：
-          # 给 fido2 组件添加 esp_tinyusb 依赖，而不是 patch CMakeLists.txt
           idf.py add-dependency --path src/fido2 "esp_tinyusb~2.0.0"
 
           idf.py set-target esp32s3
-          idf.py -DVIDPID=Yubikey5 all
+          idf.py -DVIDPID=Yubikey5 build
 
       - name: Merge ESP32-S3 flash image
         shell: bash
