@@ -91,6 +91,7 @@ jobs:
           git clone --recursive https://github.com/espressif/esp-idf.git
           cd esp-idf
           git checkout tags/v5.5
+          git submodule update --init --recursive
           ./install.sh esp32s3
 
       - name: Build ESP32-S3 firmware
@@ -100,10 +101,13 @@ jobs:
 
           . ./esp-idf/export.sh
 
-          idf.py set-target esp32s3
+          rm -rf build managed_components dependencies.lock sdkconfig
 
-          # 官方 autobuild.sh 使用的是 idf.py all
-          # 如果你确实要伪装成 Yubikey5，可以保留 -DVIDPID=Yubikey5
+          # 官方 ESP-IDF Component Manager 方法：
+          # 给 fido2 组件添加 esp_tinyusb 依赖，而不是 patch CMakeLists.txt
+          idf.py add-dependency --path src/fido2 "esp_tinyusb~2.0.0"
+
+          idf.py set-target esp32s3
           idf.py -DVIDPID=Yubikey5 all
 
       - name: Merge ESP32-S3 flash image
