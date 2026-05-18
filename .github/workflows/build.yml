@@ -11,22 +11,26 @@ jobs:
   # ==================== 任务 1：原有 Pico 系列板子编译 ====================
   build-pico:
     name: Build Pico (${{ inputs.board }})
-    # 当手动输入的 board 不是 esp32s3 时，走原有的 Pico SDK 编译流程
     if: ${{ inputs.board != 'esp32s3' && inputs.board != 'ESP32-S3' }}
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           repository: librekeys/pico-fido2
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          sudo apt install -y \
+            cmake \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
 
-      - name: Clone and build pico-sdk
+      - name: Clone pico-sdk
         run: |
           git clone https://github.com/raspberrypi/pico-sdk
           cd pico-sdk
@@ -43,85 +47,82 @@ jobs:
           cmake .. -DPICO_BOARD=${{ inputs.board }} -DVIDPID=Yubikey5
           make -j$(nproc)
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload Pico artifact
+        uses: actions/upload-artifact@v4
         with:
           name: pico_fido2_${{ inputs.board }}
           path: build_ci/pico_fido2.uf2
 
   # ==================== 任务 2：ESP32-S3 编译 ====================
-  build-esp32:
-    name: Build ESP32 (${{ inputs.board }})
+  build-esp32s3:
+    name: Build ESP32-S3 (${{ inputs.board }})
     if: ${{ inputs.board == 'esp32s3' || inputs.board == 'ESP32-S3' }}
     runs-on: ubuntu-latest
-    container: espressif/idf:release-v5.3
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           repository: librekeys/pico-fido2
-          submodules: 'recursive'
+          submodules: recursive
 
-      - name: Build firmware
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git \
+            wget \
+            flex \
+            bison \
+            gperf \
+            python3 \
+            python3-pip \
+            python3-venv \
+            cmake \
+            ninja-build \
+            ccache \
+            libffi-dev \
+            libssl-dev \
+            dfu-util \
+            libusb-1.0-0
+
+      - name: Install ESP-IDF
+        run: |
+          git clone --recursive https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          git checkout tags/v5.5
+          ./install.sh esp32s3
+
+      - name: Build ESP32-S3 firmware
         shell: bash
         run: |
           git config --global --add safe.directory '*'
 
-          . /opt/esp/idf/export.sh
-
-          # 清掉之前可能生成的错误 main 组件
-          rm -rf main build managed_components dependencies.lock sdkconfig
-
-          # 给 fido2 组件声明 esp_tinyusb 依赖，避免 idf.py add-dependency 自动创建 main
-          mkdir -p src/fido2
-          cat > src/fido2/idf_component.yml <<'EOF'
-          dependencies:
-            espressif/esp_tinyusb: "*"
-          EOF
-
-          # 在 ESP-IDF 调用 project() 之前，强制把 pico-keys-sdk 源码塞进 SOURCES
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path("CMakeLists.txt")
-          s = p.read_text()
-
-          if "FORCE_IDF_PICO_KEYS_SOURCES" not in s:
-              s, n = re.subn(
-                  r"if\s*\(\s*ESP_PLATFORM\s*\)\s*project\s*\(\s*pico_fido2\s*\)\s*endif\s*\(\s*\)",
-                  """if(ESP_PLATFORM)
-            # FORCE_IDF_PICO_KEYS_SOURCES
-            list(PREPEND SOURCES ${PICO_KEYS_SOURCES})
-            list(REMOVE_DUPLICATES SOURCES)
-            project(pico_fido2)
-          endif()""",
-                  s,
-                  count=1,
-              )
-
-              if n != 1:
-                  raise SystemExit("Failed to patch ESP_PLATFORM project() block")
-
-              p.write_text(s)
-          PY
-
-          # 必须能看到这个标记，否则说明 patch 没打进去
-          grep -F "FORCE_IDF_PICO_KEYS_SOURCES" CMakeLists.txt
+          . ./esp-idf/export.sh
 
           idf.py set-target esp32s3
-          idf.py -DVIDPID=Yubikey5 reconfigure
 
-          # 构建前验证 SDK 源码确实进入 build.ninja
-          grep -R "pico-keys-sdk/src/main.c" build/build.ninja
-          grep -R "pico-keys-sdk/src/fs/file.c" build/build.ninja
-          grep -R "pico-keys-sdk/src/asn1.c" build/build.ninja
+          # 官方 autobuild.sh 使用的是 idf.py all
+          # 如果你确实要伪装成 Yubikey5，可以保留 -DVIDPID=Yubikey5
+          idf.py -DVIDPID=Yubikey5 all
 
-          idf.py -DVIDPID=Yubikey5 build
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Merge ESP32-S3 flash image
+        shell: bash
+        run: |
+          . ./esp-idf/export.sh
+
+          mkdir -p release
+
+          cd build
+          esptool.py --chip ESP32-S3 merge_bin \
+            -o ../release/pico_fido2_esp32-s3.bin \
+            @flash_args
+
+      - name: Upload ESP32-S3 artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: pico_fido2_${{ inputs.board }}
+          name: pico_fido2_esp32-s3
           path: |
+            release/pico_fido2_esp32-s3.bin
             build/**/*.bin
             build/*.bin
