@@ -4,14 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       board:
-        description: Board to build
+        description: Board to build (e.g., pico, pico2, esp32s3)
         required: true
 
 jobs:
-  build:
-    name: Build ${{ inputs.board }}
-    strategy:
-      fail-fast: false
+  # ==================== 任务 1：原有 Pico 系列板子编译 ====================
+  build-pico:
+    name: Build Pico (${{ inputs.board }})
+    # 当手动输入的 board 不是 esp32s3 时，走原有的 Pico SDK 编译流程
+    if: ${{ inputs.board != 'esp32s3' && inputs.board != 'ESP32-S3' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -47,3 +48,36 @@ jobs:
         with:
           name: pico_fido2_${{ inputs.board }}
           path: build_ci/pico_fido2.uf2
+
+  # ==================== 任务 2：新增 ESP32-S3 编译 ====================
+  build-esp32:
+    name: Build ESP32 (${{ inputs.board }})
+    # 当手动输入为 esp32s3 或 ESP32-S3 时，触发此编译流程
+    if: ${{ inputs.board == 'esp32s3' || inputs.board == 'ESP32-S3' }}
+    runs-on: ubuntu-latest
+    # 使用乐鑫官方提供的 ESP-IDF 容器（此处指定较为稳定的 v5.3 版本，可根据项目实际需求调整）
+    container: espressif/idf:release-v5.3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          repository: librekeys/pico-fido2
+          submodules: 'recursive'
+
+      - name: Build firmware
+        run: |
+          # 激活容器内预装的 ESP-IDF 环境变量
+          . /opt/esp/idf/export.sh
+          
+          # 设置目标芯片并执行编译
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pico_fido2_${{ inputs.board }}
+          # ESP32 编译后会生成固件、引导程序和分区表，这里打包所有相关的 bin 文件
+          path: |
+            build/**/*.bin
+            build/*.bin
