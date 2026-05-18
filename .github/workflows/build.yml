@@ -62,42 +62,61 @@ jobs:
           repository: librekeys/pico-fido2
           submodules: 'recursive'
 
-      - name: Build firmware
+            - name: Build firmware
         shell: bash
         run: |
           git config --global --add safe.directory '*'
 
           . /opt/esp/idf/export.sh
 
-          # 不要让之前手工创建的 main 组件干扰 ESP-IDF 入口
+          # 清掉之前可能生成的错误 main 组件
           rm -rf main build managed_components dependencies.lock sdkconfig
 
-          # 让 ESP-IDF Component Manager 拉取 esp_tinyusb
-          # 不要用 idf.py add-dependency 去创建 main/idf_component.yml
+          # 给 fido2 组件声明 esp_tinyusb 依赖，避免 idf.py add-dependency 自动创建 main
+          mkdir -p src/fido2
           cat > src/fido2/idf_component.yml <<'EOF'
           dependencies:
             espressif/esp_tinyusb: "*"
           EOF
 
-          # 修复 ESP_PLATFORM 下没有把 pico-keys-sdk 源码编进 fido2 组件的问题
+          # 在 ESP-IDF 调用 project() 之前，强制把 pico-keys-sdk 源码塞进 SOURCES
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path("CMakeLists.txt")
           s = p.read_text()
 
-          old = "if(NOT ESP_PLATFORM) set(SOURCES ${PICO_KEYS_SOURCES}) endif()"
-          new = "set(SOURCES ${PICO_KEYS_SOURCES})"
+          if "FORCE_IDF_PICO_KEYS_SOURCES" not in s:
+              s, n = re.subn(
+                  r"if\s*\(\s*ESP_PLATFORM\s*\)\s*project\s*\(\s*pico_fido2\s*\)\s*endif\s*\(\s*\)",
+                  """if(ESP_PLATFORM)
+            # FORCE_IDF_PICO_KEYS_SOURCES
+            list(PREPEND SOURCES ${PICO_KEYS_SOURCES})
+            list(REMOVE_DUPLICATES SOURCES)
+            project(pico_fido2)
+          endif()""",
+                  s,
+                  count=1,
+              )
 
-          if old in s:
-              p.write_text(s.replace(old, new))
-          elif new in s:
-              print("Patch already applied")
-          else:
-              raise SystemExit("Could not find SOURCES assignment block in CMakeLists.txt")
+              if n != 1:
+                  raise SystemExit("Failed to patch ESP_PLATFORM project() block")
+
+              p.write_text(s)
           PY
 
+          # 必须能看到这个标记，否则说明 patch 没打进去
+          grep -F "FORCE_IDF_PICO_KEYS_SOURCES" CMakeLists.txt
+
           idf.py set-target esp32s3
+          idf.py -DVIDPID=Yubikey5 reconfigure
+
+          # 构建前验证 SDK 源码确实进入 build.ninja
+          grep -R "pico-keys-sdk/src/main.c" build/build.ninja
+          grep -R "pico-keys-sdk/src/fs/file.c" build/build.ninja
+          grep -R "pico-keys-sdk/src/asn1.c" build/build.ninja
+
           idf.py -DVIDPID=Yubikey5 build
       - name: Upload artifact
         uses: actions/upload-artifact@v7
