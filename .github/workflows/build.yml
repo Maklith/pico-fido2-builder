@@ -64,13 +64,15 @@ jobs:
 
       - name: Build firmware
         run: |
-          # 1. 极其重要：修复 Docker 容器内 Git 提示 dubious ownership 的权限问题
+          # 1. 修复 Docker 容器内 Git 提示 dubious ownership 的权限问题
           git config --global --add safe.directory '*'
           
           # 2. 激活容器内预装的 ESP-IDF 环境变量
           . /opt/esp/idf/export.sh
           
-          # 3. 显式添加缺失的 esp_tinyusb 官方组件依赖（防止项目未声明或自动解析失败）
+          # 3. 建立一个兼容的 main 组件，并显式添加 esp_tinyusb 依赖
+          mkdir -p main
+          echo "idf_component_register()" > main/CMakeLists.txt
           idf.py add-dependency "espressif/esp_tinyusb"
           
           # 4. 设置目标芯片并执行编译
