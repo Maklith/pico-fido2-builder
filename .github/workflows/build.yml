@@ -70,12 +70,36 @@ jobs:
           # 2. 激活容器内预装的 ESP-IDF 环境变量
           . /opt/esp/idf/export.sh
           
-          # 3. 建立一个兼容的 main 组件，并显式添加 esp_tinyusb 依赖
+          # 3. 创建智能依赖修复型的 main 组件
           mkdir -p main
-          echo "idf_component_register()" > main/CMakeLists.txt
+          cat << 'EOF' > main/CMakeLists.txt
+          cmake_minimum_version(VERSION 3.16)
+          
+          # 基础已知依赖
+          set(req_components fido2 tinycbor esp_tinyusb)
+          
+          # 动态扫描并依赖项目中可能隐式注册的所有其他 ESP-IDF 组件
+          # 强迫链接器完整构建依赖链，并对静态库进行正确排序，防止未定义引用错误
+          foreach(comp plat pico-keys-sdk pico_keys_sdk esp32 esp32s3 openpgp pico-openpgp pico_openpgp keys-sdk keys_sdk)
+              if(TARGET __component_${comp})
+                  list(APPEND req_components ${comp})
+              endif()
+          endforeach()
+          
+          idf_component_register(REQUIRES ${req_components})
+          
+          # 强行补充链接：如果项目通过传统 CMake 方式声明了非 IDF 标准组件库，将其强制并入主程序链接
+          foreach(lib pico_keys_sdk tinycbor openpgp)
+              if(TARGET ${lib})
+                  target_link_libraries(__component_main PUBLIC ${lib})
+              endif()
+          endforeach()
+          EOF
+          
+          # 4. 显式添加 esp_tinyusb 官方组件依赖
           idf.py add-dependency "espressif/esp_tinyusb"
           
-          # 4. 设置目标芯片并执行编译
+          # 5. 设置目标芯片并执行编译
           idf.py set-target esp32s3
           idf.py build
 
