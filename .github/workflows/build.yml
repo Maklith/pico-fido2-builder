@@ -49,13 +49,11 @@ jobs:
           name: pico_fido2_${{ inputs.board }}
           path: build_ci/pico_fido2.uf2
 
-  # ==================== 任务 2：新增 ESP32-S3 编译 ====================
+  # ==================== 任务 2：ESP32-S3 编译 ====================
   build-esp32:
     name: Build ESP32 (${{ inputs.board }})
-    # 当手动输入为 esp32s3 或 ESP32-S3 时，触发此编译流程
     if: ${{ inputs.board == 'esp32s3' || inputs.board == 'ESP32-S3' }}
     runs-on: ubuntu-latest
-    # 使用乐鑫官方提供的 ESP-IDF 容器（此处指定较为稳定的 v5.3 版本，可根据项目实际需求调整）
     container: espressif/idf:release-v5.3
     steps:
       - name: Checkout repository
@@ -66,10 +64,16 @@ jobs:
 
       - name: Build firmware
         run: |
-          # 激活容器内预装的 ESP-IDF 环境变量
+          # 1. 极其重要：修复 Docker 容器内 Git 提示 dubious ownership 的权限问题
+          git config --global --add safe.directory '*'
+          
+          # 2. 激活容器内预装的 ESP-IDF 环境变量
           . /opt/esp/idf/export.sh
           
-          # 设置目标芯片并执行编译
+          # 3. 显式添加缺失的 esp_tinyusb 官方组件依赖（防止项目未声明或自动解析失败）
+          idf.py add-dependency "espressif/esp_tinyusb"
+          
+          # 4. 设置目标芯片并执行编译
           idf.py set-target esp32s3
           idf.py build
 
@@ -77,7 +81,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pico_fido2_${{ inputs.board }}
-          # ESP32 编译后会生成固件、引导程序和分区表，这里打包所有相关的 bin 文件
           path: |
             build/**/*.bin
             build/*.bin
