@@ -63,23 +63,42 @@ jobs:
           submodules: 'recursive'
 
       - name: Build firmware
+        shell: bash
         run: |
           git config --global --add safe.directory '*'
 
           . /opt/esp/idf/export.sh
 
-          # main 是 ESP-IDF 组件，不要在这里写 cmake_minimum_required/project
-          mkdir -p main
-          cat > main/CMakeLists.txt <<'EOF'
-          idf_component_register()
+          # 不要让之前手工创建的 main 组件干扰 ESP-IDF 入口
+          rm -rf main build managed_components dependencies.lock sdkconfig
+
+          # 让 ESP-IDF Component Manager 拉取 esp_tinyusb
+          # 不要用 idf.py add-dependency 去创建 main/idf_component.yml
+          cat > src/fido2/idf_component.yml <<'EOF'
+          dependencies:
+            espressif/esp_tinyusb: "*"
           EOF
 
-          idf.py add-dependency "espressif/esp_tinyusb"
+          # 修复 ESP_PLATFORM 下没有把 pico-keys-sdk 源码编进 fido2 组件的问题
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("CMakeLists.txt")
+          s = p.read_text()
+
+          old = "if(NOT ESP_PLATFORM) set(SOURCES ${PICO_KEYS_SOURCES}) endif()"
+          new = "set(SOURCES ${PICO_KEYS_SOURCES})"
+
+          if old in s:
+              p.write_text(s.replace(old, new))
+          elif new in s:
+              print("Patch already applied")
+          else:
+              raise SystemExit("Could not find SOURCES assignment block in CMakeLists.txt")
+          PY
 
           idf.py set-target esp32s3
-          idf.py fullclean || true
-          idf.py build
-
+          idf.py -DVIDPID=Yubikey5 build
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
