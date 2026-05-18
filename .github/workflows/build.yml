@@ -62,7 +62,7 @@ jobs:
           repository: librekeys/pico-fido2
           submodules: 'recursive'
 
-            - name: Build firmware
+      - name: Build firmware
         run: |
           git config --global --add safe.directory '*'
 
